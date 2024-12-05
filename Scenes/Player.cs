@@ -1,31 +1,68 @@
 using Godot;
 using System;
 using System.Security.Cryptography;
+using static Godot.TextServer;
 
 public partial class Player : CharacterBody2D
 {
-	[Export]public float speed = 1f; 
-	[Export] public float Friction = 1f;
-    [Export]public float jumpVelocity = -400.0f;
-    [Export]private float maxSpeed;
-    [Export] private float gravity;
 
-    [Export]private AnimatedSprite2D animatedSprite;
-    [Export] private float dash;
-    private bool isDashing;
-	private bool canDash = true;
-	private Timer dashTimer;
-	private Timer dashCooldownTimer;
+    [Export] private AnimatedSprite2D animatedSprite;
+    Vector2 direction;
+
+    #region WalkStuff
+    [ExportCategory("WalkStuff")]
+    [Export]public float speed = 1f;
+    [Export] private float maxSpeed;
+    [Export] public float Friction = 1f;
+	#endregion
+
+
+	[ExportCategory("JumpStuff")]
+	[Export] private float timeToPeak = 0.4f;
+	[Export] private float timeToDecend = 0.4f;
+    [Export] private float JumpHeight = 100;
+
+    public float jumpVelocity;
+	private float ascendgravity;
+	private float fallgravity;
+
+
+
+    #region Dash Stuff
+    [ExportCategory("DashStuff")]
+    private float DashVelocity;
+
+    [Export] private float dashDistance = 200;
     [Export] private float dashTime = 0.87f;
     [Export] private float dashcooldown = 1.5f;
+   
+    private bool isDashing;
+    private bool canDash = true;
+    private Timer dashTimer;
+    private Timer dashCooldownTimer;
+
+    #endregion
+
+    private float previousX;
 
     public override void _Ready()
     {
+        DashVelocity = dashDistance / dashTime;
+		// gravity = 2 * height * time^2
+        ascendgravity = (2 * JumpHeight) / (timeToPeak * timeToPeak);
+        fallgravity = (2 * JumpHeight) / (timeToDecend * timeToDecend);
+
+        jumpVelocity = (-2 * JumpHeight) / timeToPeak;
+        InitDashEvents();
 		
-		CreateTimer(ref dashCooldownTimer, dashcooldown);
-		dashCooldownTimer.Timeout += () =>
-		{
-			canDash = true;
+    }
+
+    private void InitDashEvents()
+    {
+        CreateTimer(ref dashCooldownTimer, dashcooldown);
+        dashCooldownTimer.Timeout += () =>
+        {
+            canDash = true;
             dashCooldownTimer.Stop();
         };
         CreateTimer(ref dashTimer, dashTime);
@@ -33,13 +70,12 @@ public partial class Player : CharacterBody2D
             isDashing = false;
             canDash = false;
             dashCooldownTimer.Start();
-			dashTimer.Stop();
+            dashTimer.Stop();
         };
         animatedSprite.AnimationFinished += () =>
-		{
-			animatedSprite.Play("default");
-		};
-		
+        {
+            animatedSprite.Play("default");
+        };
     }
 
 	private void CreateTimer(ref Timer timer, float waitTime)
@@ -51,43 +87,39 @@ public partial class Player : CharacterBody2D
     public override void _PhysicsProcess(double delta)
 	{
 		Vector2 velocity = Velocity;
-		// Add the gravity.
-		if (!IsOnFloor())
-		{
-            if (velocity.Y < 0)
-            {
-				velocity.Y += gravity * (float)delta;
-            }
-			else
-			{
-                velocity.Y += (gravity * 2) * (float)delta;
+        
+        
 
-            }
-        }
 
-		// Handle Jump.
-		if (Input.IsActionJustPressed("ui_accept") && IsOnFloor())
-		{
-			velocity.Y = jumpVelocity;
-		}
-
-		// Get the input direction and handle the movement/deceleration.
-		// As good practice, you should replace UI actions with custom gameplay actions.
-		Vector2 direction = Input.GetVector("a", "d", "w", "s");
+		direction = Input.GetVector("a", "d", "w", "s");
 		if (direction != Vector2.Zero && !isDashing)
 		{
+            animatedSprite.Play("Walk");
 			velocity.X = Mathf.MoveToward(velocity.X, maxSpeed * direction.X,speed * (float)delta);
 			velocity.X = Mathf.Clamp(velocity.X, -maxSpeed, maxSpeed);
-			animatedSprite.FlipH = direction.X < 0 ? true : false;
+            PlayerFlip();
+            previousX = direction.X;
 		}
 		else if (!isDashing) 
 		{
-			velocity.X = Mathf.MoveToward(Velocity.X, 0, Friction);
-		}
+            animatedSprite.Play("Idle");
 
-		if (Input.IsActionJustPressed("Shift") && canDash || isDashing)
+            velocity.X = Mathf.MoveToward(Velocity.X, 0, Friction);
+		}
+       
+        Gravity(ref velocity, (float)delta);
+
+        if (Input.IsActionJustPressed("ui_accept") && IsOnFloor())
+        {
+            velocity.Y = jumpVelocity;
+        }
+
+        if (Input.IsActionJustPressed("Shift") && canDash)
 		{
-            velocity.X += dash * (float)delta * (int)direction.X;
+            if (previousX == 0) {
+                previousX = 1;
+            }
+            velocity.X = DashVelocity * previousX;
 			isDashing = true;
 			
         }
@@ -95,6 +127,7 @@ public partial class Player : CharacterBody2D
 		{
 			dashTimer.Start();
 		}
+
 
         Velocity = velocity;
 		MoveAndSlide();
@@ -107,4 +140,28 @@ public partial class Player : CharacterBody2D
             animatedSprite.Play("Slap");
         }
     }
+
+	private void Gravity(ref Vector2 velocity, float delta)
+	{
+        if (!IsOnFloor() && !isDashing)
+        {
+            if (velocity.Y < 0)
+            {
+                velocity.Y += ascendgravity * (float)delta;
+            }
+            else
+            {
+                velocity.Y += fallgravity * (float)delta;
+
+            }
+        }
+    }
+
+    private void PlayerFlip()
+    {
+        animatedSprite.FlipH = direction.X < 0 ? true : false;
+
+    }
+
+    
 }
